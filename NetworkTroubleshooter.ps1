@@ -1,55 +1,55 @@
 $adapter = Get-NetAdapter | Where-Object { $_.Name -eq 'Wi-Fi' } | Select-Object -First 1
 $config = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex
+$IpAddress = $config.IPv4Address.IPAddress
+$PrefixLength = $config.IPv4Address.PrefixLength
+$DefaultGateway = $config.IPv4DefaultGateway.NextHop
+function Convert-PrefixLengthToSubnetMask {
+    param (
+        [ValidateRange(0, 32)]
+        [int]$PrefixLength
+    )
 
-#$subnetmaskdecimal =Get-CimInstance -ClassName Win32_NetworkAdapterConfiguration | where-object {$_.InterfaceIndex -eq $adapter.InterfaceIndex} | Select-Object -ExpandProperty IPSubnet | where-object { $_ -like '255.*' }
+    $binary = ('1' * $PrefixLength).PadRight(32, '0')
 
-function Test-IPv4Address {
-    $GetIPAddress = $config.IPv4Address.IPAddress
-    $GetPrefixLength = $config.IPv4Address.PrefixLength
-    $GetDefaultGateway = $config.IPv4DefaultGateway.NextHop
-    #$GetSubnetMask = $subnetmaskdecimal
+    $binaryOctets = ($binary -split '(.{8})' | Where-Object { $_ -ne '' })
 
-    if($null -eq $GetPrefixLength) {
-        Write-Host "No IPv4 address is assigned to the adapter."
-        return
-    }else {
-        function Convert-PrefixLengthToNetworkAddress {
-            param (
-                [int]$PrefixLength
-            )
-            $IpSubnetToConvertedNetworkAddress = @()
-            $IpSubnetToDefaultGateway = @()
-            $binary = ('1' * $PrefixLength).PadRight(32, '0')
-            $binaryFormatted = ($binary -split '(.{8})' | Where-Object { $_ -ne '' }) -join '.'
-            $ipAddress = ($GetIPAddress -split '\.')
-            $GetDefaultGateway = ($GetDefaultGateway -split '\.')
-            $subnetMask = ($binaryFormatted -split '\.') | ForEach-Object { [Convert]::ToInt32($_, 2) }
+    $decimalOctets = $binaryOctets | ForEach-Object { [Convert]::ToInt32($_, 2) }
 
-            for ($i = 0; $i -lt 4; $i++) {
-                $result = $ipAddress[$i] -band $subnetMask[$i]
-                $ipSubnetToConvertedNetworkAddress += [string]$result
-            }
+    return ($decimalOctets -join '.')
+}
 
-            for ($i = 0; $i -lt 4; $i++) {
-                $result = $GetDefaultGateway[$i] -band $subnetMask[$i]
-                $ipSubnetToDefaultGateway += [string]$result
-            }
+function Get-NetworkAddress {
+    param (
+        [string]$IPAddress,
+        [string]$SubnetMask
+    )
 
-            If (($ipSubnetToConvertedNetworkAddress -join '.') -eq ($ipSubnetToDefaultGateway -join '.')) {
-                Write-Host "The default gateway is in the same network as the IP address."
-                Write-Host "IP Address: $($GetIPAddress)"
-                Write-Host "Default Gateway: $($ipSubnetToDefaultGateway -join '.')"
-            } else {
-                Write-Host "The default gateway is NOT in the same network as the IP address."
-                Write-Host "IP Address: $($GetIPAddress)"
-                Write-Host "Default Gateway: $($ipSubnetToDefaultGateway -join '.')"
-            }
+    $ipAddressOctets = $IPAddress -split '\.'
+    $subnetMaskOctets = $SubnetMask -split '\.'
 
-            return
-        }
+    $networkAddressOctets = @()
+
+    for ($i = 0; $i -lt 4; $i++) {
+        $networkAddressOctets += [string]($ipAddressOctets[$i] -band $subnetMaskOctets[$i])
     }
 
-    return Convert-PrefixLengthToNetworkAddress -PrefixLength $GetPrefixLength
+    return ($networkAddressOctets -join '.')
+}
+
+
+function Test-IPv4Address {
+    $subnetMask = Convert-PrefixLengthToSubnetMask -PrefixLength $PrefixLength
+
+    $ipNetworkAddress = Get-NetworkAddress -IPAddress $IpAddress -SubnetMask $subnetMask
+
+    $gatewayNetworkAddress = Get-NetworkAddress -IPAddress $DefaultGateway -SubnetMask $subnetMask
+    
+    if ($ipNetworkAddress -eq $gatewayNetworkAddress) {
+        Write-Host "The IPv4 address $IpAddress is in the same subnet as the default gateway $DefaultGateway."
+    } else {
+        Write-Host "The IPv4 address $IpAddress is NOT in the same subnet as the default gateway $DefaultGateway."
+    }
+    
 }
 
 Test-IPv4Address
