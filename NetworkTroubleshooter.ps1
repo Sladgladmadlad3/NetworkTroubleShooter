@@ -1,8 +1,9 @@
-$adapter = Get-NetAdapter | Where-Object { $_.Name -eq 'Wi-Fi' } | Select-Object -First 1
+$adapter = Get-NetAdapter | Where-Object { $_.Name -in @('Wi-Fi', 'Ethernet') -and $_.Status -eq 'Up'} | Select-Object -First 1
 $config = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex
 $IpAddress = $config.IPv4Address.IPAddress
 $PrefixLength = $config.IPv4Address.PrefixLength
 $DefaultGateway = $config.IPv4DefaultGateway.NextHop
+
 function Convert-PrefixLengthToSubnetMask {
     param (
         [ValidateRange(0, 32)]
