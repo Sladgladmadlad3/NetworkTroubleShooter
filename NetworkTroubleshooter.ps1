@@ -4,6 +4,15 @@ $IpAddress = $config.IPv4Address.IPAddress
 $PrefixLength = $config.IPv4Address.PrefixLength
 $DefaultGateway = $config.IPv4DefaultGateway.NextHop
 
+function Get-AdapterStatus {
+    if($adapter) {
+        $($adapter | Select-Object Name, InterfaceDescription) | Out-Host
+    } else {
+        Write-Host "No Adapter Found"
+    }
+}
+
+
 function Convert-PrefixLengthToSubnetMask {
     param (
         [ValidateRange(0, 32)]
@@ -46,11 +55,12 @@ function Test-IPv4Address {
     $gatewayNetworkAddress = Get-NetworkAddress -IPAddress $DefaultGateway -SubnetMask $subnetMask
     
     if ($ipNetworkAddress -eq $gatewayNetworkAddress) {
-        Write-Host "The IPv4 address $IpAddress is in the same subnet as the default gateway $DefaultGateway."
+        #Write-Host "The IPv4 address $IpAddress is in the same subnet as the default gateway $DefaultGateway"
     } else {
-        Write-Host "The IPv4 address $IpAddress is NOT in the same subnet as the default gateway $DefaultGateway."
+        Write-Host "The IPv4 address $IpAddress is NOT in the same subnet as the default gateway $DefaultGateway"
     }
     
 }
 
+Get-AdapterStatus
 Test-IPv4Address
