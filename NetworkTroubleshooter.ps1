@@ -4,9 +4,27 @@ $IpAddress = $config.IPv4Address.IPAddress
 $PrefixLength = $config.IPv4Address.PrefixLength
 $DefaultGateway = $config.IPv4DefaultGateway.NextHop
 
-function Get-AdapterStatus {
+function New-TestResult {
+    param (
+        $TestName,
+        $Value,
+        [ValidateSet("PASS", "FAIL", "WARNING", "SKIP")]
+        [String]$Status,
+        $Message
+    )
+
+    return [PSCustomObject]@{
+        TestName = $TestName
+        Value = $Value
+        Status = $Status
+        Message = $Message
+    }
+}
+
+
+function Get-FirstUpAdapter {
     if($adapter) {
-        $($adapter | Select-Object Name, InterfaceDescription) | Out-Host
+        $($adapter | Select-Object Name, InterfaceDescription, Status) | Out-Host
     } else {
         Write-Host "No Adapter Found"
     }
@@ -48,19 +66,49 @@ function Get-NetworkAddress {
 
 
 function Test-IPv4Address {
-    $subnetMask = Convert-PrefixLengthToSubnetMask -PrefixLength $PrefixLength
-
-    $ipNetworkAddress = Get-NetworkAddress -IPAddress $IpAddress -SubnetMask $subnetMask
-
-    $gatewayNetworkAddress = Get-NetworkAddress -IPAddress $DefaultGateway -SubnetMask $subnetMask
     
-    if ($ipNetworkAddress -eq $gatewayNetworkAddress) {
-        #Write-Host "The IPv4 address $IpAddress is in the same subnet as the default gateway $DefaultGateway"
-    } else {
-        Write-Host "The IPv4 address $IpAddress is NOT in the same subnet as the default gateway $DefaultGateway"
+    
+    if ($null -eq $IpAddress) {
+        $Status = "FAIL"
+        $Message = "No IPv4 address found for the adapter $($adapter.Name)"
+        Return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
+    } elseif ($IpAddress.StartsWith("169.254.") -and $PrefixLength -eq 16) {
+        $Status = "WARNING"
+        $Message = "IPv4 address is in the link-local range: $IpAddress"
+        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
+    } elseif ($null -eq $adapter) {
+        $Status = "SKIP"
+        $Message = ""
+        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
+    }
+    else {
+        $Status = "PASS"
+        $Message = "IPv4 address found"
+        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
     }
     
 }
 
-Get-AdapterStatus
-Test-IPv4Address
+function Show-TestResults {
+    param (
+        $Results = @()
+    )
+
+    $Results | ForEach-Object {
+
+    Write-Host "Test: $($_.TestName)"
+    Write-Host "Value: $($_.Value)"
+
+    switch ($_.Status) {
+        "PASS"    { Write-Host "Status: PASS" -ForegroundColor Green }
+        "FAIL"    { Write-Host "Status: FAIL" -ForegroundColor Red }
+        "WARNING" { Write-Host "Status: WARNING" -ForegroundColor Yellow }
+        "SKIP"    { Write-Host "Status: SKIP" -ForegroundColor DarkGray }
+    }
+
+    Write-Host "Message: $($_.Message)"
+    Write-Host ""
+}
+}
+
+Show-TestResults -Results @(Test-IPv4Address)
