@@ -1,8 +1,4 @@
-$adapter = Get-NetAdapter | Where-Object { $_.Name -in @('Wi-Fi', 'Ethernet') -and $_.Status -eq 'Up'} | Select-Object -First 1
-$config = Get-NetIPConfiguration -InterfaceIndex $adapter.InterfaceIndex
-$IpAddress = $config.IPv4Address.IPAddress
-$PrefixLength = $config.IPv4Address.PrefixLength
-$DefaultGateway = $config.IPv4DefaultGateway.NextHop
+$adapter = Get-NetAdapter | Where-Object {$_.Name -in @('Wi-Fi', 'Ethernet 8')}
 
 function New-TestResult {
     param (
@@ -10,25 +6,39 @@ function New-TestResult {
         $Value,
         [ValidateSet("PASS", "FAIL", "WARNING", "SKIP")]
         [String]$Status,
-        $Message
+        $Message,
+        $Details
     )
 
     return [PSCustomObject]@{
         TestName = $TestName
-        Value = $Value
         Status = $Status
+        Value = $Value
         Message = $Message
+        Details = $Details
     }
 }
 
 
-function Get-FirstUpAdapter {
-    if($adapter) {
-        $($adapter | Select-Object Name, InterfaceDescription, Status) | Out-Host
-    } else {
-        Write-Host "No Adapter Found"
+function Get-PrimaryAdapter {
+    $candidateAdapters = $adapter
+
+    $upAdapter = $candidateAdapters |
+        Where-Object { $_.Status -eq 'Up' } |
+        Select-Object -First 1
+
+    if ($null -ne $upAdapter) {
+        return $upAdapter
     }
+
+    return $candidateAdapters | Select-Object -First 1
 }
+
+$config = Get-NetIPConfiguration -InterfaceIndex (Get-PrimaryAdapter).InterfaceIndex
+$IpAddress = $config.IPv4Address.IPAddress
+$PrefixLength = $config.IPv4Address.PrefixLength
+$DefaultGateway = $config.IPv4DefaultGateway.NextHop
+
 
 
 function Convert-PrefixLengthToSubnetMask {
@@ -64,31 +74,97 @@ function Get-NetworkAddress {
     return ($networkAddressOctets -join '.')
 }
 
+$subnetMask = Convert-PrefixLengthToSubnetMask -PrefixLength $PrefixLength
+$ipNetworkAddress = Get-NetworkAddress `
+    -IPAddress $IpAddress `
+    -SubnetMask $subnetMask
 
-function Test-IPv4Address {
-    
-    
-    if ($null -eq $IpAddress) {
-        $Status = "FAIL"
-        $Message = "No IPv4 address found for the adapter $($adapter.Name)"
-        Return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
-    } elseif ($IpAddress.StartsWith("169.254.") -and $PrefixLength -eq 16) {
-        $Status = "WARNING"
-        $Message = "IPv4 address is in the link-local range: $IpAddress"
-        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
-    } elseif ($null -eq $adapter) {
-        $Status = "SKIP"
-        $Message = ""
-        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
+$gatewayNetworkAddress = Get-NetworkAddress `
+    -IPAddress $DefaultGateway `
+    -SubnetMask $subnetMask
+
+function Test-NetworkAdapter {
+   $adapter = Get-PrimaryAdapter
+
+    if ($null -eq $adapter) {
+        return New-TestResult `
+            -TestName "Network Adapter Test" `
+            -Status "FAIL" `
+            -Message "No Ethernet or Wi-Fi adapter found." `
+            -Details $null
     }
+
+    $details = [PSCustomObject]@{
+        Type        = $adapter.Name
+        Description = $adapter.InterfaceDescription
+        AdminStatus = $adapter.AdminStatus
+        LinkSpeed   = $adapter.LinkSpeed
+    }
+
+    if ($adapter.AdminStatus -eq "Down") {
+        return New-TestResult `
+            -TestName "Network Adapter Test" `
+            -Status "FAIL" `
+            -Message "Adapter is administratively disabled." `
+            -Details $details
+    }
+
+    elseif ($adapter.Status -eq "Disconnected") {
+        return New-TestResult `
+            -TestName "Network Adapter Test" `
+            -Status "FAIL" `
+            -Message "Adapter is enabled but has no active link." `
+            -Details $details
+    }
+
     else {
-        $Status = "PASS"
-        $Message = "IPv4 address found"
-        return New-TestResult -TestName "IPv4 Address Test" -Value $IpAddress -Status $Status -Message $Message
+        return New-TestResult `
+            -TestName "Network Adapter Test" `
+            -Status "PASS" `
+            -Message "Adapter appears operational." `
+            -Details $details
     }
-    
 }
 
+function Test-IPv4Address {
+    if ($null -eq $adapter) {
+        return New-TestResult `
+            -TestName "IPv4 Address Test" `
+            -Value $null `
+            -Status "SKIP" `
+            -Message "No active physical adapter found"
+    }
+
+    if ($null -eq $IpAddress) {
+        return New-TestResult `
+            -TestName "IPv4 Address Test" `
+            -Value $null `
+            -Status "FAIL" `
+            -Message "No IPv4 address found for adapter $($adapter.Name)"
+    }
+
+    if ($IpAddress.StartsWith("169.254.") -and $PrefixLength -eq 16) {
+        return New-TestResult `
+            -TestName "IPv4 Address Test" `
+            -Value $IpAddress `
+            -Status "WARNING" `
+            -Message "IPv4 address is in the link-local range"
+    }
+
+    if ($ipNetworkAddress -ne $gatewayNetworkAddress) {
+        return New-TestResult `
+            -TestName "IPv4 Address Test" `
+            -Value $IpAddress `
+            -Status "FAIL" `
+            -Message "IPv4 address and default gateway are not in the same subnet"
+    }
+
+    return New-TestResult `
+        -TestName "IPv4 Address Test" `
+        -Value $IpAddress `
+        -Status "PASS" `
+        -Message "IPv4 address found and gateway is in the same subnet"
+}
 function Show-TestResults {
     param (
         $Results = @()
@@ -107,8 +183,14 @@ function Show-TestResults {
     }
 
     Write-Host "Message: $($_.Message)"
+    if($null -ne $_.Details) {
+        
+        $_.Details.PSObject.Properties | ForEach-Object {
+            Write-Host "$($_.Name): $($_.Value)"
+        }
+    }
     Write-Host ""
 }
 }
-
+Show-TestResults -Results @(Test-NetworkAdapter)
 Show-TestResults -Results @(Test-IPv4Address)
