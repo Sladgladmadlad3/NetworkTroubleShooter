@@ -1,4 +1,4 @@
-$adapter = Get-NetAdapter | Where-Object {$_.Name -in @('Wi-Fi', 'Ethernet 8')}
+$adapter = Get-NetAdapter | Where-Object {$_.Name -in @('Wi-Fi', 'Ethernet')}
 
 function New-TestResult {
     param (
@@ -36,10 +36,10 @@ function Get-PrimaryAdapter {
 
 $config = Get-NetIPConfiguration -InterfaceIndex (Get-PrimaryAdapter).InterfaceIndex
 $IpAddress = $config.IPv4Address.IPAddress
+#$IpAddress = "169.254.0.0"
 $PrefixLength = $config.IPv4Address.PrefixLength
+#$PrefixLength = 16
 $DefaultGateway = $config.IPv4DefaultGateway.NextHop
-
-
 
 function Convert-PrefixLengthToSubnetMask {
     param (
@@ -120,11 +120,14 @@ function Test-NetworkAdapter {
     else {
         return New-TestResult `
             -TestName "Network Adapter Test" `
+            -Value "NA" `
             -Status "PASS" `
-            -Message "Adapter appears operational." `
+            -Message "Adapter appears operational" `
             -Details $details
     }
 }
+
+$adapterResult = Test-NetworkAdapter
 
 function Test-IPv4Address {
     if ($null -eq $adapter) {
@@ -153,18 +156,57 @@ function Test-IPv4Address {
 
     if ($ipNetworkAddress -ne $gatewayNetworkAddress) {
         return New-TestResult `
-            -TestName "IPv4 Address Test" `
+            -TestName "IPv4 Address" `
             -Value $IpAddress `
             -Status "FAIL" `
             -Message "IPv4 address and default gateway are not in the same subnet"
     }
 
     return New-TestResult `
-        -TestName "IPv4 Address Test" `
+        -TestName "IPv4 Address" `
         -Value $IpAddress `
         -Status "PASS" `
         -Message "IPv4 address found and gateway is in the same subnet"
 }
+
+$ipv4Result = Test-IPv4Address
+function Test-GatewayReachability {
+
+    if ($AdapterResult.Status -ne "PASS") {
+        return New-TestResult `
+            -TestName "Gateway Reachability" `
+            -Status "SKIP" `
+            -Message "Gateway test skipped because adapter test did not pass."
+    }
+
+    if ($IPv4Result.Status -ne "PASS") {
+        return New-TestResult `
+            -TestName "Gateway Reachability" `
+            -Status "SKIP" `
+            -Message "Gateway test skipped because IPv4 configuration did not pass."
+    }
+
+    $reachable = Test-Connection `
+        -ComputerName $DefaultGateway `
+        -Count 4 `
+        -Quiet
+
+    if ($reachable) {
+        return New-TestResult `
+            -TestName "Gateway Reachability" `
+            -Value $DefaultGateway `
+            -Status "PASS" `
+            -Message "Default gateway responded to ICMP."
+    }
+
+    return New-TestResult `
+        -TestName "Gateway Reachability" `
+        -Value $DefaultGateway `
+        -Status "WARNING" `
+        -Message "Default gateway did not respond to ICMP."
+}
+
+$gatewayReachabilityResult = Test-GatewayReachability
 function Show-TestResults {
     param (
         $Results = @()
@@ -192,5 +234,7 @@ function Show-TestResults {
     Write-Host ""
 }
 }
-Show-TestResults -Results @(Test-NetworkAdapter)
-Show-TestResults -Results @(Test-IPv4Address)
+
+Show-TestResults -Results @($adapterResult)
+Show-TestResults -Results @($ipv4Result)
+Show-TestResults -Results @($gatewayReachabilityResult)
