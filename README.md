@@ -39,17 +39,17 @@ Tests return structured results using the following statuses:
 
 Example:
 
-Network Adapter Test
-Status: PASS
-Message: Adapter appears operational.
-Type: Wi-Fi
-Description: Intel(R) Wi-Fi 7 BE201 320MHz
-AdminStatus: Up
-LinkSpeed: 1.1 Gbps
+Network Adapter Test \
+Status: PASS \
+Message: Adapter appears operational. \
+Type: Wi-Fi \
+Description: Intel(R) Wi-Fi 7 BE201 320MHz \
+AdminStatus: Up \
+LinkSpeed: 1.1 Gbps 
 
-IPv4 Address Test
-Status: PASS
-Value: 10.10.6.68
+IPv4 Address Test \
+Status: PASS \
+Value: 10.10.6.68 \
 Message: IPv4 address found and gateway is in the same subnet
 
 ## Project Goals
